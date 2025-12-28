@@ -26,7 +26,7 @@
 ```mermaid
 graph TB
     subgraph "Control System"
-        BT[Bluetooth Module<br/>BluetoothSerial]
+        BT[Bluetooth Module<br/>DabbleESP32]
         ESP[ESP32 Dev Module<br/>Main Controller]
         US[HC-SR04<br/>Ultrasonic Sensor]
         BUZ[Active Buzzer<br/>Warning Alarm]
@@ -44,7 +44,7 @@ graph TB
     end
     
     subgraph "External Interface"
-        APP[Mobile App<br/>Bluetooth Terminal]
+        APP[Dabble App<br/>Gamepad Interface]
     end
     
     APP -->|Commands: F,B,L,R,S| BT
@@ -322,7 +322,7 @@ graph TB
         end
         
         subgraph "Driver Layer"
-            BT_DRV[BluetoothSerial Driver]
+            BT_DRV[DabbleESP32 Driver]
             MOTOR_DRV[Motor Control Driver]
             SENSOR_DRV[Ultrasonic Sensor Driver]
         end
@@ -359,14 +359,15 @@ graph TB
 flowchart TD
     START([Program Start]) --> SETUP[Setup Function]
     SETUP --> INIT_SERIAL[Initialize Serial Monitor]
-    INIT_SERIAL --> INIT_BT[Initialize Bluetooth<br/>Name: IoT_RaceCar]
+    INIT_SERIAL --> INIT_BT[Initialize Dabble Bluetooth<br/>Name: IoT_RaceCar]
     INIT_BT --> INIT_PINS[Configure GPIO Pins<br/>Motors & Sensor]
     INIT_PINS --> INIT_MOTORS[Stop All Motors<br/>Safe Initial State]
     INIT_MOTORS --> PRINT_READY[Print Ready Message]
     PRINT_READY --> LOOP_START([Enter Main Loop])
     
-    LOOP_START --> CHECK_BT{Bluetooth Data<br/>Available?}
-    CHECK_BT -->|Yes| READ_CMD[Read Command Character<br/>Store in lastCommand]
+    LOOP_START --> PROCESS_DABBLE[Process Dabble Input<br/>Dabble.processInput()]
+    PROCESS_DABBLE --> CHECK_BT{Command<br/>Received?}
+    CHECK_BT -->|Yes| READ_CMD[Read Gamepad Command<br/>Store in lastCommand]
     CHECK_BT -->|No| MEASURE
     READ_CMD --> MEASURE[Measure Distance<br/>getDistance function]
     
@@ -375,7 +376,7 @@ flowchart TD
     CHECK_DIST -->|Yes - DANGER!| EMERGENCY[Emergency Stop]
     EMERGENCY --> STOP_MOTORS[Call stopCar function]
     STOP_MOTORS --> ACTIVATE_BUZZER[Activate Buzzer<br/>digitalWrite HIGH]
-    ACTIVATE_BUZZER --> SEND_WARNING[Send: OBSTACLE! STOPPED<br/>via Bluetooth]
+    ACTIVATE_BUZZER --> SEND_WARNING[Print: OBSTACLE! STOPPED<br/>to Serial Monitor]
     SEND_WARNING --> LOOP_START
     
     CHECK_DIST -->|No - Safe| DEACTIVATE_BUZZER[Deactivate Buzzer<br/>digitalWrite LOW]
@@ -407,14 +408,15 @@ flowchart TD
 
 ```mermaid
 sequenceDiagram
-    participant App as Mobile App
+    participant App as Dabble App
     participant BT as Bluetooth Module
     participant ESP as ESP32 Controller
     participant Sensor as HC-SR04
     participant Motors as Motor Driver
     
-    App->>BT: Send Command 'F'
-    BT->>ESP: Receive Character
+    App->>BT: Gamepad Button Press (Forward)
+    BT->>ESP: Dabble.processInput()
+    ESP->>ESP: Read Gamepad State
     ESP->>ESP: Store Command
     
     ESP->>Sensor: Trigger Pulse (10µs)
@@ -430,29 +432,32 @@ sequenceDiagram
         Motors->>Motors: Both Motors Stop
         ESP->>ESP: Activate Buzzer (HIGH)
         Note over ESP: Audible warning beeps
-        ESP->>BT: "OBSTACLE! STOPPED"
-        BT->>App: Display Warning
-        Note over App,Motors: User notified of obstacle
+        ESP->>ESP: Print "OBSTACLE! STOPPED"<br/>to Serial Monitor
+        Note over ESP: Debug message for<br/>developer monitoring
     end
     
     Note over ESP: Loop repeats continuously<br/>No delay, non-blocking
 ```
 
-### **Bluetooth Command Set**
+### **Dabble Gamepad Command Mapping**
 
-| Command | Character | Action | Motor States |
-|---------|-----------|--------|--------------|
-| Forward | `F` | Move forward | Left: FWD, Right: FWD |
-| Backward | `B` | Move backward | Left: BACK, Right: BACK |
-| Left | `L` | Turn left | Left: STOP, Right: FWD |
-| Right | `R` | Turn right | Left: FWD, Right: STOP |
-| Stop | `S` | Stop all motors | Both: STOP |
+| Dabble Button | Command | Action | Motor States |
+|---------------|---------|--------|--------------|
+| **Up Arrow** | Forward | Move forward | Left: FWD, Right: FWD |
+| **Down Arrow** | Backward | Move backward | Left: BACK, Right: BACK |
+| **Left Arrow** | Left | Turn left | Left: STOP, Right: FWD |
+| **Right Arrow** | Right | Turn right | Left: FWD, Right: STOP |
+| **No Button Pressed** | Stop | Stop all motors | Both: STOP |
+
+**Note:** Commands are read from Dabble's Gamepad module. The ESP32 continuously checks button states via `Dabble.processInput()`.
 
 ### **Bluetooth Messages**
-- **From ESP32:**
+- **From ESP32 (via Serial Monitor):**
   - `"IoT Race Car Ready!"` - System startup
   - `"OBSTACLE! STOPPED"` - Obstacle detected
   - `"Command: X"` - Command confirmation (optional debug)
+
+**Note:** Status messages are sent to Serial Monitor for debugging. The Dabble app displays real-time gamepad input but does not receive text feedback from ESP32.
 
 ---
 
@@ -509,9 +514,10 @@ void setup()
 **Purpose:** Initialize all hardware components and communication  
 **Actions:**
 - Initialize Serial Monitor (115200 baud)
-- Initialize Bluetooth with device name "IoT_RaceCar"
+- Initialize Dabble Bluetooth with device name "IoT_RaceCar" using `Dabble.begin()`
 - Set all motor pins as OUTPUT
 - Set ultrasonic pins (TRIG: OUTPUT, ECHO: INPUT)
+- Set buzzer pin as OUTPUT
 - Stop all motors (safe initial state)
 - Print ready message for debugging
 
@@ -623,14 +629,24 @@ digitalWrite(BUZZER_PIN, LOW)
 ### **4. Communication Functions**
 
 ```cpp
-// Read Bluetooth command
-if (SerialBT.available()) {
-    char command = SerialBT.read();
-    lastCommand = command;
+// Process Dabble input (call in main loop)
+Dabble.processInput();
+
+// Read gamepad commands
+if (GamePad.isUpPressed()) {
+    lastCommand = 'F';  // Forward
+} else if (GamePad.isDownPressed()) {
+    lastCommand = 'B';  // Backward
+} else if (GamePad.isLeftPressed()) {
+    lastCommand = 'L';  // Left
+} else if (GamePad.isRightPressed()) {
+    lastCommand = 'R';  // Right
+} else {
+    lastCommand = 'S';  // Stop
 }
 
-// Send status message
-SerialBT.println("OBSTACLE! STOPPED");
+// Send status message (to Serial Monitor)
+Serial.println("OBSTACLE! STOPPED");
 ```
 
 ---
@@ -671,11 +687,14 @@ graph TD
 ### **Test Cases**
 
 #### **Phase 1: Component Tests**
-1. **Bluetooth Connection Test**
-   - Upload code and open Serial Monitor
-   - Connect via Bluetooth terminal app
-   - Verify "IoT_RaceCar" appears in device list
-   - Send test character, verify reception
+1. **Dabble Bluetooth Connection Test**
+   - Install Dabble app on Android/iOS device
+   - Upload code to ESP32 and open Serial Monitor
+   - Open Dabble app and enable Bluetooth
+   - Select "IoT_RaceCar" from device list
+   - Open Gamepad module in Dabble app
+   - Press buttons and verify Serial Monitor shows command reception
+   - Verify ESP32 responds to button presses
 
 2. **Ultrasonic Sensor Test**
    - Place object at known distance (10cm, 20cm, 30cm)
@@ -696,52 +715,55 @@ graph TD
 
 #### **Phase 2: Integration Tests**
 5. **Command Execution Test**
-   - Send each command via Bluetooth
-   - Verify correct motor response
-   - Check command persistence (continues until new command)
+   - Press each button on Dabble gamepad (Up, Down, Left, Right)
+   - Verify correct motor response for each direction
+   - Release button and verify car stops
+   - Check command persistence (car continues movement while button held)
 
-5. **Obstacle Detection Test**
-   - Place hand at 25cm - car should move
-   - Place hand at 15cm - car should stop
-   - Verify "OBSTACLE! STOPPED" message received
+6. **Obstacle Detection Test**
+   - Press forward button on Dabble gamepad
+   - Place hand at 25cm - car should move forward
+   - Place hand at 15cm - car should stop immediately
+   - Verify "OBSTACLE! STOPPED" message in Serial Monitor
    - **Verify buzzer sounds when obstacle detected**
    - **Verify buzzer stops when obstacle removed**
 
-6. **Emergency Stop Test**
-   - Send forward command
+7. **Emergency Stop Test**
+   - Press forward button on Dabble gamepad
    - Move obstacle into path (<20cm)
    - Verify immediate stop (response time <100ms)
    - **Verify buzzer activates immediately**
+   - Remove obstacle and verify car can move again
 
 #### **Phase 3: System Tests**
-7. **Continuous Operation Test**
+8. **Continuous Operation Test**
    - Run for 10 minutes with random commands
    - Verify no crashes or hangs
    - Check for memory leaks
 
-8. **Response Time Test**
+9. **Response Time Test**
    - Measure command-to-action latency
    - Measure obstacle detection latency
    - Target: <50ms for both
 
-9. **Edge Cases Test**
+10. **Edge Cases Test**
    - Very close obstacles (2-5cm)
    - Objects at maximum range (400cm)
    - Rapid command changes
    - Continuous forward with obstacle
 
 #### **Phase 4: Race Track Tests**
-10. **Track Navigation**
+11. **Track Navigation**
     - Test on actual race track
     - Navigate corners and straightaways
     - Verify no false obstacle detections
 
-11. **Turn Accuracy**
+12. **Turn Accuracy**
     - Measure turn radius
     - Adjust motor speeds if needed
     - Test left/right turn consistency
 
-12. **Speed Tuning**
+13. **Speed Tuning**
     - Adjust MOTOR_SPEED constant
     - Find optimal speed for:
       - Maximum velocity
@@ -890,7 +912,8 @@ graph TD
 
 | Problem | Possible Cause | Solution |
 |---------|---------------|----------|
-| Can't connect to Bluetooth | Code not uploaded / wrong name | Re-upload code, check device name in app |
+| Can't connect to Dabble | Code not uploaded / wrong name / library not installed | Re-upload code, install DabbleESP32 library, check device name in Dabble app |
+| Dabble buttons not working | Library not initialized / processInput() not called | Ensure Dabble.begin() in setup() and Dabble.processInput() in loop() |
 | Motors not spinning | No battery power / loose wires | Check 7.4V battery, verify all connections |
 | One motor not working | Loose connection / dead motor | Check specific motor wiring and connections |
 | Wrong motor direction | Reversed polarity | Swap motor wires at L298N terminals |
@@ -923,10 +946,17 @@ graph TD
 ## 📚 Required Libraries
 
 ```cpp
-#include <BluetoothSerial.h>  // Built-in ESP32 library
+#include <DabbleESP32.h>  // External library for Dabble app integration
 ```
 
-**Installation:** BluetoothSerial is included with ESP32 board package in Arduino IDE.
+**Installation:** 
+1. Open Arduino IDE
+2. Go to **Sketch → Include Library → Manage Libraries**
+3. Search for **"DabbleESP32"**
+4. Install the library by **STEMpedia** (or **Dabble**)
+5. Alternatively, download from GitHub: https://github.com/STEMpedia/DabbleESP32
+
+**Note:** The DabbleESP32 library handles all Bluetooth communication with the Dabble mobile app, including gamepad input processing.
 
 ### **Arduino IDE Setup**
 1. Install ESP32 board support:
@@ -934,13 +964,36 @@ graph TD
    - Additional Board Manager URLs: `https://dl.espressif.com/dl/package_esp32_index.json`
    - Tools → Board → Boards Manager → Search "ESP32" → Install
 
-2. Select board:
+2. Install DabbleESP32 library:
+   - Sketch → Include Library → Manage Libraries
+   - Search "DabbleESP32" → Install
+
+3. Select board:
    - Tools → Board → ESP32 Arduino → ESP32 Dev Module
 
-3. Configure settings:
+4. Configure settings:
    - Upload Speed: 115200
    - Flash Frequency: 80MHz
    - Partition Scheme: Default
+
+### **Dabble Mobile App Setup**
+1. **Download Dabble App:**
+   - Android: Google Play Store
+   - iOS: App Store (if available)
+   - Search for "Dabble" by STEMpedia
+
+2. **Connect to ESP32:**
+   - Power on ESP32
+   - Open Dabble app on mobile device
+   - Enable Bluetooth on mobile device
+   - Tap "Connect" in Dabble app
+   - Select "IoT_RaceCar" from device list
+   - Wait for connection confirmation
+
+3. **Using Gamepad Module:**
+   - In Dabble app, select "Gamepad" module
+   - Use directional arrows to control the car
+   - Up = Forward, Down = Backward, Left = Turn Left, Right = Turn Right
 
 ---
 
@@ -987,7 +1040,7 @@ Ensures continuous sensor monitoring:
 - [x] Pin configuration designed
 - [x] Software architecture planned
 - [x] Flowcharts and diagrams created
-- [ ] **Create Arduino .ino file**
+- [ ] **Create Arduino .ino file with DabbleESP32 library**
 - [ ] **Write motor control functions**
 - [ ] **Implement sensor reading**
 - [ ] **Implement main loop logic**

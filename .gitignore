@@ -1,0 +1,25 @@
+# Ignore readme.md
+readme.md
+
+# Arduino IDE
+*.hex
+*.elf
+*.bin
+build/
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.bak
+
