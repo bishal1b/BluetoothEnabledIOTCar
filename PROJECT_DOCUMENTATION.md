@@ -365,13 +365,13 @@ flowchart TD
     INIT_MOTORS --> PRINT_READY[Print Ready Message]
     PRINT_READY --> LOOP_START([Enter Main Loop])
     
-    LOOP_START --> PROCESS_DABBLE[Process Dabble Input<br/>Dabble.processInput()]
+    LOOP_START --> PROCESS_DABBLE[Process Dabble Input<br/>Call processInput]
     PROCESS_DABBLE --> CHECK_BT{Command<br/>Received?}
     CHECK_BT -->|Yes| READ_CMD[Read Gamepad Command<br/>Store in lastCommand]
     CHECK_BT -->|No| MEASURE
     READ_CMD --> MEASURE[Measure Distance<br/>getDistance function]
     
-    MEASURE --> CHECK_DIST{Distance <<br/>STOPPING_DISTANCE?}
+    MEASURE --> CHECK_DIST{Distance less than<br/>STOPPING_DISTANCE?}
     
     CHECK_DIST -->|Yes - DANGER!| EMERGENCY[Emergency Stop]
     EMERGENCY --> STOP_MOTORS[Call stopCar function]

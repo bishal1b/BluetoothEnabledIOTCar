@@ -1,6 +1,12 @@
 # Ignore readme.md
 readme.md
 
+# Ignore HARDWARE_SHOPPING_LIST.md
+HARDWARE_SHOPPING_LIST.md
+
+# Ignore HARDWARE_SHOPPING_LIST.TXT
+HARDWARE_SHOPPING_LIST.TXT
+
 # Arduino IDE
 *.hex
 *.elf
